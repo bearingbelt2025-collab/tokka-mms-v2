@@ -1,11 +1,11 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState } from 'react'
+import { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
-import type { User } from '@supabase/supabase-js'
 import type { Profile } from '@/types/database'
 
-interface AuthContextValue {
+interface AuthContextType {
   user: User | null
   profile: Profile | null
   isAdmin: boolean
@@ -13,7 +13,7 @@ interface AuthContextValue {
   signOut: () => Promise<void>
 }
 
-const AuthContext = createContext<AuthContextValue>({
+const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   isAdmin: false,
@@ -27,32 +27,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setIsLoading(false)
-      }
-    })
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
-        setIsLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const fetchProfile = async (userId: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data } = await (supabase as any)
@@ -61,11 +35,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .eq('id', userId)
       .single()
     setProfile(data)
-    setIsLoading(false)
   }
+
+  useEffect(() => {
+    // Initial session check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        fetchProfile(session.user.id).finally(() => setIsLoading(false))
+      } else {
+        setIsLoading(false)
+      }
+    })
+
+    // Auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const currentUser = session?.user ?? null
+        setUser(currentUser)
+        if (currentUser) {
+          await fetchProfile(currentUser.id)
+        } else {
+          setProfile(null)
+        }
+        setIsLoading(false)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const signOut = async () => {
     await supabase.auth.signOut()
+    setUser(null)
+    setProfile(null)
   }
 
   return (
@@ -83,4 +87,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+export function useAuth() {
+  return useContext(AuthContext)
+}
