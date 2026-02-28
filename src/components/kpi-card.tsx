@@ -1,41 +1,39 @@
-import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
-type Color = 'blue' | 'orange' | 'red' | 'purple' | 'green'
-
-const colorMap: Record<Color, { bg: string; icon: string; value: string }> = {
-  blue: { bg: 'bg-blue-50', icon: 'text-blue-600', value: 'text-blue-700' },
-  orange: { bg: 'bg-orange-50', icon: 'text-orange-600', value: 'text-orange-700' },
-  red: { bg: 'bg-red-50', icon: 'text-red-600', value: 'text-red-700' },
-  purple: { bg: 'bg-purple-50', icon: 'text-purple-600', value: 'text-purple-700' },
-  green: { bg: 'bg-green-50', icon: 'text-green-600', value: 'text-green-700' },
+interface KpiCardProps {
+  title: string
+  value: string | number
+  subtitle?: string
+  icon: LucideIcon
+  trend?: 'up' | 'down' | 'neutral'
+  trendValue?: string
+  className?: string
 }
 
-export function KpiCard({
-  title,
-  value,
-  icon,
-  color = 'blue',
-}: {
-  title: string
-  value: number
-  icon: React.ReactNode
-  color?: Color
-}) {
-  const colors = colorMap[color]
+export function KpiCard({ title, value, subtitle, icon: Icon, trend, trendValue, className }: KpiCardProps) {
+  const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
+  const trendColor = trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : 'text-muted-foreground'
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">{title}</p>
-            <p className={cn('text-2xl font-bold mt-1', colors.value)}>{value}</p>
-          </div>
-          <div className={cn('p-2.5 rounded-lg', colors.bg)}>
-            <span className={colors.icon}>{icon}</span>
-          </div>
+    <div className={cn('bg-card border border-border rounded-md p-4 flex flex-col gap-3', className)}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground font-body uppercase tracking-wide">{title}</p>
+        <div className="h-8 w-8 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+          <Icon className="h-4 w-4 text-primary" />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div>
+        <p className="text-2xl font-bold font-mono-display">{value}</p>
+        {subtitle && <p className="text-xs text-muted-foreground font-body mt-0.5">{subtitle}</p>}
+      </div>
+      {trend && trendValue && (
+        <div className={cn('flex items-center gap-1', trendColor)}>
+          <TrendIcon className="h-3 w-3" />
+          <span className="text-xs font-body">{trendValue}</span>
+        </div>
+      )}
+    </div>
   )
 }

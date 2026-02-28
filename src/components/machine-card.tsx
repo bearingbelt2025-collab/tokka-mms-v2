@@ -1,98 +1,82 @@
-'use client'
-
-import { useState } from 'react'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { StatusBadge } from '@/components/status-badge'
-import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { updateMachineStatus } from '@/lib/supabase/mutations'
-import { useToast } from '@/hooks/use-toast'
-import { MapPin, Hash, Wrench } from 'lucide-react'
-import { MACHINE_STATUSES } from '@/lib/constants'
+import { cn } from '@/lib/utils'
+import { StatusBadge } from './status-badge'
+import { Cog, MapPin, Calendar, Wrench } from 'lucide-react'
 import type { Machine } from '@/types/database'
 
-export function MachineCard({
-  machine,
-  onUpdate,
-}: {
+interface MachineCardProps {
   machine: Machine
-  onUpdate: () => void
-}) {
-  const [updating, setUpdating] = useState(false)
-  const { toast } = useToast()
+  onClick?: () => void
+}
 
-  const handleStatusChange = async (status: Machine['status']) => {
-    setUpdating(true)
-    try {
-      await updateMachineStatus(machine.id, status)
-      toast({ title: 'Status updated' })
-      onUpdate()
-    } catch {
-      toast({ title: 'Error updating status', variant: 'destructive' })
-    } finally {
-      setUpdating(false)
-    }
-  }
+export function MachineCard({ machine, onClick }: MachineCardProps) {
+  const specs = machine.specs as Record<string, string> | null
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-slate-900 truncate">{machine.name}</h3>
-            {machine.model && (
-              <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                <Wrench className="h-3 w-3" />
-                {machine.model}
-              </p>
-            )}
+    <div
+      className={cn(
+        'bg-card border border-border rounded-md overflow-hidden transition-all duration-100',
+        onClick && 'cursor-pointer hover:border-primary/40 hover:bg-card/80'
+      )}
+      onClick={onClick}
+    >
+      {/* Image */}
+      <div className="relative h-36 bg-muted">
+        {machine.photo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={machine.photo_url}
+            alt={machine.name}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center">
+            <Cog className="h-10 w-10 text-muted-foreground/30" />
           </div>
-          <StatusBadge status={machine.status} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="space-y-1.5">
-          {machine.location && (
-            <p className="text-xs text-slate-500 flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5" />
-              {machine.location}
-            </p>
-          )}
-          {machine.serial_number && (
-            <p className="text-xs text-slate-500 flex items-center gap-1.5">
-              <Hash className="h-3.5 w-3.5" />
-              {machine.serial_number}
-            </p>
-          )}
-        </div>
-        {machine.notes && (
-          <p className="text-xs text-slate-600 bg-slate-50 rounded p-2 line-clamp-2">
-            {machine.notes}
-          </p>
         )}
-        <div className="pt-1">
-          <Select
-            value={machine.status}
-            onValueChange={(v) => handleStatusChange(v as Machine['status'])}
-            disabled={updating}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MACHINE_STATUSES.map((s) => (
-                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="absolute top-2 right-2">
+          <StatusBadge status={machine.status} size="sm" />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Content */}
+      <div className="p-3 space-y-2">
+        <div>
+          <h3 className="font-semibold font-mono-display text-sm truncate">{machine.name}</h3>
+          <p className="text-xs text-muted-foreground font-body">{machine.machine_type}</p>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="font-body truncate">{machine.location}</span>
+          </div>
+          {machine.installed_date && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Calendar className="h-3 w-3 shrink-0" />
+              <span className="font-body">
+                {new Date(machine.installed_date).getFullYear()}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {specs && Object.keys(specs).length > 0 && (
+          <div className="pt-2 border-t border-border">
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(specs)
+                .slice(0, 3)
+                .map(([k, v]) => (
+                  <span
+                    key={k}
+                    className="text-[10px] px-1.5 py-0.5 bg-secondary rounded-sm font-body text-muted-foreground"
+                  >
+                    {v}
+                  </span>
+                ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
