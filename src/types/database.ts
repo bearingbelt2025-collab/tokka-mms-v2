@@ -1,92 +1,114 @@
-export type MachineStatus = 'running' | 'maintenance_due' | 'breakdown'
-export type WoStatus = 'open' | 'in_progress' | 'pending_parts' | 'closed'
+export type MachineStatus = 'running' | 'idle' | 'maintenance' | 'breakdown'
+export type WoStatus = 'open' | 'in_progress' | 'pending_parts' | 'completed' | 'cancelled'
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
 export type UserRole = 'admin' | 'technician'
 
 export interface Machine {
   id: string
   name: string
-  model: string | null
-  serial_number: string | null
-  location: string | null
+  machine_type: string
+  location: string
   status: MachineStatus
-  notes: string | null
+  specs: Record<string, string> | null
   photo_url: string | null
+  installed_date: string | null
   created_at: string
   updated_at: string
 }
 
+export interface MachineInsert {
+  name: string
+  machine_type: string
+  location: string
+  status?: MachineStatus
+  specs?: Record<string, string> | null
+  photo_url?: string | null
+  installed_date?: string | null
+}
+
 export interface WorkOrder {
   id: string
-  machine_id: string
-  issue_type: string
-  issue_description: string
-  priority: Priority
+  title: string
+  description: string | null
+  machine_id: string | null
   status: WoStatus
+  priority: Priority
   assigned_to: string | null
-  photo_url: string | null
+  created_by: string
+  due_date: string | null
+  completed_at: string | null
   created_at: string
-  closed_at: string | null
+  updated_at: string
+}
+
+export interface WorkOrderInsert {
+  title: string
+  description?: string | null
+  machine_id?: string | null
+  status?: WoStatus
+  priority: Priority
+  assigned_to?: string | null
+  created_by: string
+  due_date?: string | null
+}
+
+export interface Profile {
+  id: string
+  name: string
+  role: UserRole
+  avatar_url: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface PmSchedule {
   id: string
-  machine_id: string
-  task_description: string
-  frequency_days: number
-  next_due_date: string
-  last_completed_date: string | null
-  is_active: boolean
+  machine_id: string | null
+  task_name: string
+  frequency_days: number | null
+  last_completed: string | null
+  next_due: string | null
+  notes: string | null
   created_at: string
+  updated_at: string
+}
+
+export interface PmScheduleInsert {
+  machine_id?: string | null
+  task_name: string
+  frequency_days?: number | null
+  next_due?: string | null
+  notes?: string | null
 }
 
 export interface DowntimeLog {
   id: string
   machine_id: string
-  reason: string
-  notes: string | null
-  start_time: string
-  end_time: string | null
+  started_at: string
+  ended_at: string | null
   duration_minutes: number | null
+  reason: string
+  category: string | null
+  logged_by: string
   created_at: string
 }
 
-export interface UserProfile {
-  id: string
-  email: string
-  full_name: string | null
-  role: UserRole
-  created_at: string
+export interface DowntimeLogInsert {
+  machine_id: string
+  started_at: string
+  ended_at?: string | null
+  duration_minutes?: number | null
+  reason: string
+  category?: string | null
+  logged_by: string
 }
 
-export type Database = {
-  public: {
-    Tables: {
-      machines: {
-        Row: Machine
-        Insert: Omit<Machine, 'id' | 'created_at' | 'updated_at'>
-        Update: Partial<Omit<Machine, 'id' | 'created_at' | 'updated_at'>>
-      }
-      work_orders: {
-        Row: WorkOrder
-        Insert: Omit<WorkOrder, 'id' | 'created_at'>
-        Update: Partial<Omit<WorkOrder, 'id' | 'created_at'>>
-      }
-      pm_schedules: {
-        Row: PmSchedule
-        Insert: Omit<PmSchedule, 'id' | 'created_at'>
-        Update: Partial<Omit<PmSchedule, 'id' | 'created_at'>>
-      }
-      downtime_logs: {
-        Row: DowntimeLog
-        Insert: Omit<DowntimeLog, 'id' | 'created_at'>
-        Update: Partial<Omit<DowntimeLog, 'id' | 'created_at'>>
-      }
-      user_profiles: {
-        Row: UserProfile
-        Insert: Omit<UserProfile, 'created_at'>
-        Update: Partial<Omit<UserProfile, 'created_at'>>
-      }
-    }
-  }
+export interface DashboardKpis {
+  total_machines: number
+  running_machines: number
+  breakdown_machines: number
+  open_work_orders: number
+  in_progress_work_orders: number
+  overdue_pm_tasks: number
+  total_downtime_minutes_30d: number
 }

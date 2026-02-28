@@ -1,23 +1,26 @@
-'use client'
-
-import { useState, useEffect } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { User } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-export function useSupabaseUser() {
-  const [user, setUser] = useState<User | null>(null)
+type QueryFn<T> = (supabase: SupabaseClient) => PromiseLike<{ data: T[] | null; error: unknown }>
+
+export function useSupabase<T>(queryFn: QueryFn<T>) {
+  const [data, setData] = useState<T[] | null>(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [error, setError] = useState<unknown>(null)
+
+  const fetch = useCallback(async () => {
+    setLoading(true)
+    const supabase = createClient()
+    const { data, error } = await queryFn(supabase)
+    setData(data)
+    setError(error)
+    setLoading(false)
+  }, [queryFn])
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setUser(session?.user ?? null)
-        setLoading(false)
-      }
-    )
-    return () => subscription.unsubscribe()
-  }, [supabase])
+    fetch()
+  }, [fetch])
 
-  return { user, loading }
+  return { data, loading, error, refetch: fetch }
 }
