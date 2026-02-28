@@ -39,7 +39,7 @@ interface MachineDetailData {
   downtimeLogs: DowntimeLogWithProfile[]
 }
 
-// ─── Add Machine Dialog ────────────────────────────────────────────────────────
+// ─── Add Machine Dialog ───────────────────────────────────────────────────────
 
 function AddMachineDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
   const supabase = createClient()
@@ -196,7 +196,7 @@ function AddMachineDialog({ open, onClose, onAdded }: { open: boolean; onClose: 
   )
 }
 
-// ─── Machine Detail Dialog ──────────────────────────────────────────────────────
+// ─── Machine Detail Dialog ─────────────────────────────────────────────────────
 
 function MachineDetailDialog({
   machine,
@@ -313,18 +313,24 @@ function MachineDetailDialog({
           {/* Admin: Change Status */}
           {isAdmin && (
             <div>
-              <p className="text-xs font-semibold font-mono-display mb-2 text-muted-foreground uppercase tracking-wide">Change Status</p>
-              <div className="flex flex-wrap gap-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide mb-2 block">Change Status</Label>
+              <div className="flex gap-2">
                 {MACHINE_STATUSES.map((s) => (
                   <Button
-                    key={s.value}
-                    variant={machine.status === s.value ? 'default' : 'outline'}
+                    key={s}
                     size="sm"
-                    onClick={() => handleStatusChange(s.value as MachineStatus)}
-                    disabled={updatingStatus || machine.status === s.value}
-                    className="text-xs h-7"
+                    variant={machine.status === s ? 'default' : 'outline'}
+                    disabled={updatingStatus}
+                    onClick={() => handleStatusChange(s)}
+                    className={
+                      machine.status === s
+                        ? s === 'running' ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : s === 'maintenance_due' ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                          : 'bg-red-600 hover:bg-red-700 text-white'
+                        : ''
+                    }
                   >
-                    {s.label}
+                    {s.replace('_', ' ')}
                   </Button>
                 ))}
               </div>
@@ -334,73 +340,95 @@ function MachineDetailDialog({
           <Separator />
 
           {/* Tabs */}
-          {loadingDetail ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Loading details...</p>
-          ) : detail ? (
-            <Tabs defaultValue="work-orders">
-              <TabsList className="bg-secondary">
-                <TabsTrigger value="work-orders" className="text-xs">Work Orders ({detail.workOrders.length})</TabsTrigger>
-                <TabsTrigger value="pm" className="text-xs">PM Schedule ({detail.pmSchedules.length})</TabsTrigger>
-                <TabsTrigger value="downtime" className="text-xs">Downtime ({detail.downtimeLogs.length})</TabsTrigger>
-              </TabsList>
+          <Tabs defaultValue="work-orders">
+            <TabsList className="bg-secondary">
+              <TabsTrigger value="work-orders" className="text-xs">Work Orders ({detail?.workOrders.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="downtime" className="text-xs">Downtime ({detail?.downtimeLogs.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="pm" className="text-xs">PM Schedule ({detail?.pmSchedules.length ?? 0})</TabsTrigger>
+            </TabsList>
 
-              <TabsContent value="work-orders" className="mt-3">
-                {detail.workOrders.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">No work orders</p>
-                ) : (
-                  <div className="space-y-2">
-                    {detail.workOrders.map((wo) => (
-                      <div key={wo.id} className="bg-background rounded-md border border-border p-3">
+            <TabsContent value="work-orders" className="mt-3">
+              {loadingDetail ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : detail?.workOrders.length === 0 ? (
+                <EmptyState title="No work orders" icon={Cog} className="py-6" />
+              ) : (
+                <div className="space-y-2">
+                  {detail?.workOrders.map((wo) => (
+                    <div key={wo.id} className="bg-background border border-border rounded-md p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">{wo.issue_type}</p>
+                          {wo.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{wo.description}</p>}
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <PriorityBadge priority={wo.priority} />
+                          <WoStatusBadge status={wo.status} />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{format(new Date(wo.created_at), 'MMM d, yyyy HH:mm')}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="downtime" className="mt-3">
+              {loadingDetail ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : detail?.downtimeLogs.length === 0 ? (
+                <EmptyState title="No downtime recorded" icon={Cog} className="py-6" />
+              ) : (
+                <div className="space-y-2">
+                  {detail?.downtimeLogs.map((dl) => (
+                    <div key={dl.id} className="bg-background border border-border rounded-md p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">{dl.reason ?? 'No reason given'}</p>
+                          <p className="text-xs text-muted-foreground">{format(new Date(dl.started_at), 'MMM d, yyyy HH:mm')}</p>
+                        </div>
+                        {dl.duration_minutes && (
+                          <span className="text-xs font-mono-display bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded-sm shrink-0">
+                            {Math.floor(dl.duration_minutes / 60)}h {dl.duration_minutes % 60}m
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="pm" className="mt-3">
+              {loadingDetail ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : detail?.pmSchedules.length === 0 ? (
+                <EmptyState title="No PM schedules" icon={Cog} className="py-6" />
+              ) : (
+                <div className="space-y-2">
+                  {detail?.pmSchedules.map((pm) => {
+                    const isOverdue = new Date(pm.next_due) < new Date()
+                    return (
+                      <div key={pm.id} className={`bg-background border rounded-md p-3 ${isOverdue ? 'border-red-500/40' : 'border-border'}`}>
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium">{wo.title}</p>
-                          <WoStatusBadge status={wo.status} size="sm" />
+                          <div>
+                            <p className="text-sm font-medium">{pm.task_name}</p>
+                            <p className="text-xs text-muted-foreground">Every {pm.interval_days} days</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className={`text-xs font-mono-display ${isOverdue ? 'text-red-400' : 'text-emerald-400'}`}>
+                              {isOverdue ? 'OVERDUE' : 'On Schedule'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Due: {format(new Date(pm.next_due), 'MMM d')}</p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3 mt-1">
-                          <PriorityBadge priority={wo.priority} size="sm" />
-                          {wo.assignee && <p className="text-xs text-muted-foreground">Assigned: {wo.assignee.name}</p>}
-                        </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="pm" className="mt-3">
-                {detail.pmSchedules.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">No PM schedules</p>
-                ) : (
-                  <div className="space-y-2">
-                    {detail.pmSchedules.map((pm) => (
-                      <div key={pm.id} className="bg-background rounded-md border border-border p-3">
-                        <p className="text-sm font-medium">{pm.task_name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Next due: {pm.next_due ? format(new Date(pm.next_due), 'MMM d, yyyy') : 'N/A'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="downtime" className="mt-3">
-                {detail.downtimeLogs.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">No downtime records</p>
-                ) : (
-                  <div className="space-y-2">
-                    {detail.downtimeLogs.map((dt) => (
-                      <div key={dt.id} className="bg-background rounded-md border border-border p-3">
-                        <p className="text-sm font-medium">{dt.reason}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {format(new Date(dt.started_at), 'MMM d, yyyy HH:mm')}
-                          {dt.duration_minutes && ` • ${dt.duration_minutes} min`}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          ) : null}
+                    )
+                  })}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </DialogContent>
     </Dialog>
@@ -409,76 +437,76 @@ function MachineDetailDialog({
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
-export default function MachinesClientPage() {
-  const { data: machines, loading, refetch } = useSupabase<Machine>(
-    (sb) => (sb as any).from('machines').select('*').order('name')
-  )
-  const [search, setSearch] = useState('')
-  const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null)
-  const [showAdd, setShowAdd] = useState(false)
+export default function MachinesPage() {
+  const supabase = useSupabase()
   const { isAdmin } = useAuth()
+  const [machines, setMachines] = useState<Machine[]>([])
+  const [openWoCount, setOpenWoCount] = useState<Record<number, number>>({})
+  const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null)
 
-  const filtered = (machines ?? []).filter(
-    (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.machine_type.toLowerCase().includes(search.toLowerCase()) ||
-      m.location.toLowerCase().includes(search.toLowerCase())
-  )
+  const fetchMachines = useCallback(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = supabase as any
+    const [machinesRes, woRes] = await Promise.all([
+      supabase.from('machines').select('*').order('name'),
+      sb.from('work_orders').select('machine_id').neq('status', 'completed'),
+    ])
+    setMachines(machinesRes.data ?? [])
+
+    const counts: Record<number, number> = {}
+    for (const wo of (woRes.data ?? []) as { machine_id: number }[]) {
+      counts[wo.machine_id] = (counts[wo.machine_id] ?? 0) + 1
+    }
+    setOpenWoCount(counts)
+    setLoading(false)
+  }, [supabase])
+
+  useEffect(() => {
+    fetchMachines()
+  }, [fetchMachines])
 
   return (
     <div>
       <PageHeader
-        title="Machines"
-        description={`${filtered.length} machine${filtered.length !== 1 ? 's' : ''} registered`}
-        action={
-          isAdmin ? (
-            <Button size="sm" onClick={() => setShowAdd(true)} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 text-xs">
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Add Machine
-            </Button>
-          ) : undefined
-        }
+        title="Machine Registry"
+        subtitle={`${machines.length} machines registered`}
+        action={{
+          label: 'Add Machine',
+          onClick: () => setAddOpen(true),
+          show: isAdmin,
+          icon: Plus,
+        }}
       />
 
-      <div className="mb-4">
-        <Input
-          placeholder="Search machines..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm bg-background"
-        />
-      </div>
-
       {loading ? (
-        <LoadingGrid />
-      ) : filtered.length === 0 ? (
+        <LoadingGrid count={6} />
+      ) : machines.length === 0 ? (
         <EmptyState
+          title="No machines registered"
+          description="Add your first machine to get started"
           icon={Cog}
-          title="No machines found"
-          description={search ? 'Try a different search term' : 'Add your first machine to get started'}
+          className="mt-12"
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filtered.map((machine) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {machines.map((machine) => (
             <MachineCard
               key={machine.id}
               machine={machine}
+              openWoCount={openWoCount[machine.id] ?? 0}
               onClick={() => setSelectedMachine(machine)}
             />
           ))}
         </div>
       )}
 
-      <AddMachineDialog
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        onAdded={refetch}
-      />
-
+      <AddMachineDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={fetchMachines} />
       <MachineDetailDialog
         machine={selectedMachine}
         onClose={() => setSelectedMachine(null)}
-        onUpdated={refetch}
+        onUpdated={fetchMachines}
       />
     </div>
   )

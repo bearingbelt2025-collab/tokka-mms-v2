@@ -1,82 +1,59 @@
+import { Cog, AlertTriangle, CheckCircle2, WrenchIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { StatusBadge } from './status-badge'
-import { Cog, MapPin, Calendar, Wrench } from 'lucide-react'
-import type { Machine } from '@/types/database'
+import type { Machine, MachineStatus } from '@/types/database'
 
 interface MachineCardProps {
   machine: Machine
-  onClick?: () => void
+  openWoCount: number
+  onClick: () => void
 }
 
-export function MachineCard({ machine, onClick }: MachineCardProps) {
-  const specs = machine.specs as Record<string, string> | null
+const statusConfig: Record<MachineStatus, { label: string; color: string; icon: React.FC<{ className?: string }> }> = {
+  running: { label: 'Running', color: 'text-emerald-400', icon: CheckCircle2 },
+  maintenance_due: { label: 'Maint. Due', color: 'text-amber-400', icon: AlertTriangle },
+  down: { label: 'Down', color: 'text-red-400', icon: AlertTriangle },
+}
+
+export function MachineCard({ machine, openWoCount, onClick }: MachineCardProps) {
+  const cfg = statusConfig[machine.status]
+  const StatusIcon = cfg.icon
 
   return (
     <div
-      className={cn(
-        'bg-card border border-border rounded-md overflow-hidden transition-all duration-100',
-        onClick && 'cursor-pointer hover:border-primary/40 hover:bg-card/80'
-      )}
+      className="bg-card border border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition-colors"
       onClick={onClick}
     >
-      {/* Image */}
-      <div className="relative h-36 bg-muted">
+      <div className="flex gap-3">
         {machine.photo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={machine.photo_url}
             alt={machine.name}
-            className="h-full w-full object-cover"
+            className="h-14 w-14 rounded-md object-cover border border-border shrink-0"
           />
         ) : (
-          <div className="h-full w-full flex items-center justify-center">
-            <Cog className="h-10 w-10 text-muted-foreground/30" />
+          <div className="h-14 w-14 rounded-md bg-secondary flex items-center justify-center border border-border shrink-0">
+            <Cog className="h-6 w-6 text-muted-foreground" />
           </div>
         )}
-        <div className="absolute top-2 right-2">
-          <StatusBadge status={machine.status} size="sm" />
+
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-sm truncate font-body">{machine.name}</h3>
+          <p className="text-xs text-muted-foreground truncate">{machine.machine_type} · {machine.location}</p>
+
+          <div className="flex items-center gap-1 mt-1.5">
+            <StatusIcon className={cn('h-3 w-3', cfg.color)} />
+            <span className={cn('text-xs font-mono-display', cfg.color)}>{cfg.label}</span>
+          </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="p-3 space-y-2">
-        <div>
-          <h3 className="font-semibold font-mono-display text-sm truncate">{machine.name}</h3>
-          <p className="text-xs text-muted-foreground font-body">{machine.machine_type}</p>
+      {openWoCount > 0 && (
+        <div className="mt-3 flex items-center gap-1.5 bg-amber-500/10 rounded-sm px-2 py-1">
+          <WrenchIcon className="h-3 w-3 text-amber-400" />
+          <span className="text-xs text-amber-400 font-body">{openWoCount} open work order{openWoCount !== 1 ? 's' : ''}</span>
         </div>
-
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3 shrink-0" />
-            <span className="font-body truncate">{machine.location}</span>
-          </div>
-          {machine.installed_date && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Calendar className="h-3 w-3 shrink-0" />
-              <span className="font-body">
-                {new Date(machine.installed_date).getFullYear()}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {specs && Object.keys(specs).length > 0 && (
-          <div className="pt-2 border-t border-border">
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(specs)
-                .slice(0, 3)
-                .map(([k, v]) => (
-                  <span
-                    key={k}
-                    className="text-[10px] px-1.5 py-0.5 bg-secondary rounded-sm font-body text-muted-foreground"
-                  >
-                    {v}
-                  </span>
-                ))}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

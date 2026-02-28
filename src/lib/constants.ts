@@ -1,29 +1,28 @@
-export const MACHINE_STATUSES = [
-  { value: 'running', label: 'Running' },
-  { value: 'idle', label: 'Idle' },
-  { value: 'maintenance', label: 'Maintenance' },
-  { value: 'breakdown', label: 'Breakdown' },
+export const MACHINE_STATUSES = ['running', 'maintenance_due', 'down'] as const
+
+export const ISSUE_TYPES = [
+  'Electrical',
+  'Mechanical',
+  'Hydraulic',
+  'Pneumatic',
+  'Software',
+  'Lubrication',
+  'Calibration',
+  'Cleaning',
+  'Inspection',
+  'Other',
 ] as const
 
-export const WO_STATUSES = [
-  { value: 'open', label: 'Open' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'pending_parts', label: 'Pending Parts' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'cancelled', label: 'Cancelled' },
-] as const
+export const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const
 
-export const PRIORITIES = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'critical', label: 'Critical' },
-] as const
+export const WORK_ORDER_STATUSES = ['open', 'in_progress', 'pending_parts', 'completed'] as const
 
-export const DOWNTIME_CATEGORIES = [
-  { value: 'mechanical', label: 'Mechanical' },
-  { value: 'electrical', label: 'Electrical' },
-  { value: 'operator', label: 'Operator' },
-  { value: 'planned', label: 'Planned' },
-  { value: 'other', label: 'Other' },
+export const PM_INTERVALS = [
+  { label: 'Daily', days: 1 },
+  { label: 'Weekly', days: 7 },
+  { label: 'Bi-weekly', days: 14 },
+  { label: 'Monthly', days: 30 },
+  { label: 'Quarterly', days: 90 },
+  { label: 'Semi-annual', days: 180 },
+  { label: 'Annual', days: 365 },
 ] as const
