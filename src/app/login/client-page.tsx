@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
@@ -12,7 +11,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
   const { toast } = useToast()
   const supabase = createClient()
 
@@ -32,8 +30,8 @@ export default function LoginPage() {
       return
     }
 
-    router.push('/')
-    router.refresh()
+    // Full page reload to ensure cookies are sent to the server middleware
+    window.location.href = '/'
   }
 
   return (
