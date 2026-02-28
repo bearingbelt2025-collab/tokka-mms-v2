@@ -1,218 +1,142 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useSupabase } from '@/hooks/use-supabase'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Filter, X } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { ClipboardList, Plus, Search, Filter } from 'lucide-react'
+import { format } from 'date-fns'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/auth-context'
 import { PageHeader } from '@/components/page-header'
-import { PriorityBadge } from '@/components/priority-badge'
 import { WoStatusBadge } from '@/components/wo-status-badge'
+import { PriorityBadge } from '@/components/priority-badge'
+import { LoadingTable } from '@/components/loading-skeleton'
 import { EmptyState } from '@/components/empty-state'
-import { CardSkeleton } from '@/components/loading-skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { Machine, WorkOrder, WorkOrderInsert } from '@/types/database'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import type { WorkOrder, Machine, Profile, WoStatus, Priority, WorkOrderInsert } from '@/types/database'
+import { WO_STATUSES, PRIORITIES } from '@/lib/constants'
 
-type Priority = 'low' | 'medium' | 'high' | 'critical'
-type WoStatus = 'open' | 'in_progress' | 'on_hold' | 'completed'
-type IssueType = 'mechanical' | 'electrical' | 'hydraulic' | 'pneumatic' | 'software' | 'other'
-
-const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'critical']
-const WO_STATUSES: WoStatus[] = ['open', 'in_progress', 'on_hold', 'completed']
-const ISSUE_TYPES: IssueType[] = ['mechanical', 'electrical', 'hydraulic', 'pneumatic', 'software', 'other']
-
-type WorkOrderWithDetails = WorkOrder & {
-  machine: { name: string } | null
+type WorkOrderWithRefs = WorkOrder & {
+  machine: { name: string; location: string } | null
   creator: { name: string } | null
   assignee: { name: string } | null
 }
 
-// ─── Create / Edit WO Dialog ───────────────────────────────────────────────────
-
-function WoDialog({
+// ─── Create Work Order Dialog ─────────────────────────────────────────────────
+function CreateWoDialog({
   open,
   onClose,
-  onSaved,
-  wo,
+  onCreated,
   machines,
+  technicians,
 }: {
   open: boolean
   onClose: () => void
-  onSaved: () => void
-  wo?: WorkOrderWithDetails
+  onCreated: () => void
   machines: Machine[]
+  technicians: Profile[]
 }) {
   const supabase = createClient()
-  const { user } = useAuth()
   const { toast } = useToast()
-  const isEdit = !!wo
-
-  const [machineId, setMachineId] = useState(wo?.machine_id ? String(wo.machine_id) : '')
-  const [issueType, setIssueType] = useState<IssueType>((wo?.issue_type as IssueType) ?? 'mechanical')
-  const [priority, setPriority] = useState<Priority>((wo?.priority as Priority) ?? 'medium')
-  const [status, setStatus] = useState<WoStatus>((wo?.status as WoStatus) ?? 'open')
-  const [description, setDescription] = useState(wo?.description ?? '')
-  const [notes, setNotes] = useState(wo?.notes ?? '')
+  const { user } = useAuth()
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    machine_id: '',
+    priority: 'medium' as Priority,
+    assigned_to: '' as string,
+    due_date: '',
+  })
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (wo) {
-      setMachineId(String(wo.machine_id))
-      setIssueType(wo.issue_type as IssueType)
-      setPriority(wo.priority as Priority)
-      setStatus(wo.status as WoStatus)
-      setDescription(wo.description ?? '')
-      setNotes(wo.notes ?? '')
-    }
-  }, [wo])
-
-  const resetForm = () => {
-    setMachineId(''); setIssueType('mechanical'); setPriority('medium'); setStatus('open')
-    setDescription(''); setNotes('')
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return
     setLoading(true)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
 
-    try {
-      const { data: profileRaw } = await sb
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single()
-      const profileData = profileRaw as { id: string } | null
-      if (!profileData) throw new Error('Profile not found')
-
-      if (isEdit && wo) {
-        const { error } = await sb
-          .from('work_orders')
-          .update({
-            machine_id: parseInt(machineId),
-            issue_type: issueType,
-            priority,
-            status,
-            description: description || null,
-            notes: notes || null,
-            ...(status === 'completed' && !wo.completed_at ? { completed_at: new Date().toISOString() } : {}),
-          })
-          .eq('id', wo.id)
-        if (error) throw error
-        toast({ title: 'Work order updated' })
-      } else {
-        const insert: WorkOrderInsert = {
-          machine_id: parseInt(machineId),
-          issue_type: issueType,
-          priority,
-          status: 'open',
-          description: description || null,
-          notes: notes || null,
-          created_by: profileData.id,
-        }
-        const { error } = await sb.from('work_orders').insert(insert)
-        if (error) throw error
-        toast({ title: 'Work order created' })
-      }
-      resetForm()
-      onSaved()
-      onClose()
-    } catch (err: unknown) {
-      toast({ variant: 'destructive', title: 'Error', description: (err as Error).message })
-    } finally {
-      setLoading(false)
+    const insert: WorkOrderInsert = {
+      title: form.title,
+      description: form.description || null,
+      machine_id: form.machine_id || null,
+      priority: form.priority,
+      assigned_to: form.assigned_to || null,
+      due_date: form.due_date || null,
+      created_by: user.id,
+      status: 'open',
     }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from('work_orders').insert(insert)
+    if (error) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message })
+    } else {
+      toast({ title: 'Work order created' })
+      onCreated()
+      onClose()
+      setForm({ title: '', description: '', machine_id: '', priority: 'medium', assigned_to: '', due_date: '' })
+    }
+    setLoading(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { resetForm(); onClose() } }}>
-      <DialogContent className="bg-card border-border max-w-sm">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="bg-card border-border max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-mono-display">{isEdit ? 'Edit Work Order' : 'New Work Order'}</DialogTitle>
+          <DialogTitle className="font-mono-display">Create Work Order</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-3 mt-2">
+        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Machine *</Label>
-            <Select value={machineId} onValueChange={setMachineId} required>
-              <SelectTrigger className="bg-background border-border">
-                <SelectValue placeholder="Select machine..." />
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border">
-                {machines.map((m) => (
-                  <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Title *</Label>
+            <Input value={form.title} onChange={(e) => setForm(p => ({ ...p, title: e.target.value }))} required placeholder="Replace hydraulic filter" className="bg-background" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Description</Label>
+            <Textarea value={form.description} onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Detailed description..." className="bg-background resize-none" rows={3} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Issue Type *</Label>
-              <Select value={issueType} onValueChange={(v) => setIssueType(v as IssueType)}>
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  {ISSUE_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</SelectItem>
-                  ))}
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Machine</Label>
+              <Select value={form.machine_id} onValueChange={(v) => setForm(p => ({ ...p, machine_id: v }))}>
+                <SelectTrigger className="bg-background"><SelectValue placeholder="Select..." /></SelectTrigger>
+                <SelectContent>
+                  {machines.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Priority *</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  {PRIORITIES.map((p) => (
-                    <SelectItem key={p} value={p}><PriorityBadge priority={p} /></SelectItem>
-                  ))}
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Priority</Label>
+              <Select value={form.priority} onValueChange={(v) => setForm(p => ({ ...p, priority: v as Priority }))}>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PRIORITIES.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          {isEdit && (
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Status</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as WoStatus)}>
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  {WO_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}><WoStatusBadge status={s} /></SelectItem>
-                  ))}
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Assign To</Label>
+              <Select value={form.assigned_to} onValueChange={(v) => setForm(p => ({ ...p, assigned_to: v }))}>
+                <SelectTrigger className="bg-background"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                <SelectContent>
+                  {technicians.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-          )}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Description</Label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe the issue..."
-              className="bg-background resize-none"
-              rows={3}
-            />
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Due Date</Label>
+              <Input type="date" value={form.due_date} onChange={(e) => setForm(p => ({ ...p, due_date: e.target.value }))} className="bg-background" />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Notes</Label>
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes..." className="bg-background" />
-          </div>
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="outline" className="flex-1" onClick={() => { resetForm(); onClose() }}>Cancel</Button>
+          <div className="flex gap-2 pt-2">
+            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={loading} className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90">
-              {loading ? 'Saving...' : isEdit ? 'Save Changes' : 'Create WO'}
+              {loading ? 'Creating...' : 'Create'}
             </Button>
           </div>
         </form>
@@ -221,315 +145,242 @@ function WoDialog({
   )
 }
 
-// ─── WO Detail Drawer ──────────────────────────────────────────────────────────
-
+// ─── Work Order Detail ────────────────────────────────────────────────────────
 function WoDetailDialog({
   wo,
   onClose,
-  onEdit,
-  onStatusChange,
+  onUpdated,
+  machines,
+  technicians,
 }: {
-  wo: WorkOrderWithDetails | null
+  wo: WorkOrderWithRefs | null
   onClose: () => void
-  onEdit: (wo: WorkOrderWithDetails) => void
-  onStatusChange: () => void
+  onUpdated: () => void
+  machines: Machine[]
+  technicians: Profile[]
 }) {
   const supabase = createClient()
   const { toast } = useToast()
-  const [updatingStatus, setUpdatingStatus] = useState<WoStatus | null>(null)
+  const { isAdmin } = useAuth()
+  const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [form, setForm] = useState({ assigned_to: '', due_date: '' })
 
-  const handleStatusChange = async (newStatus: WoStatus) => {
+  const handleStatusChange = async (status: WoStatus) => {
     if (!wo) return
-    setUpdatingStatus(newStatus)
+    setUpdatingStatus(true)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
-    try {
-      const { error } = await sb
-        .from('work_orders')
-        .update({
-          status: newStatus,
-          ...(newStatus === 'completed' ? { completed_at: new Date().toISOString() } : {}),
-        })
-        .eq('id', wo.id)
-      if (error) throw error
+    const { error } = await (supabase as any).from('work_orders').update({ status }).eq('id', wo.id)
+    if (error) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message })
+    } else {
       toast({ title: 'Status updated' })
-      onStatusChange()
+      onUpdated()
       onClose()
-    } catch (err: unknown) {
-      toast({ variant: 'destructive', title: 'Error', description: (err as Error).message })
-    } finally {
-      setUpdatingStatus(null)
     }
+    setUpdatingStatus(false)
   }
+
+  if (!wo) return null
 
   return (
     <Dialog open={!!wo} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="bg-card border-border max-w-sm">
+      <DialogContent className="bg-card border-border max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="font-mono-display">Work Order #{wo?.id}</DialogTitle>
+          <DialogTitle className="font-mono-display text-base">{wo.title}</DialogTitle>
         </DialogHeader>
-        {wo && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <PriorityBadge priority={wo.priority} />
-              <WoStatusBadge status={wo.status} />
+
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <WoStatusBadge status={wo.status} />
+            <PriorityBadge priority={wo.priority} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Machine</p>
+              <p className="font-medium">{wo.machine?.name ?? '—'}</p>
+              {wo.machine?.location && <p className="text-xs text-muted-foreground">{wo.machine.location}</p>}
             </div>
-
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Machine</span>
-                <span className="font-semibold font-mono-display">{wo.machine?.name ?? '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Issue Type</span>
-                <span className="capitalize">{wo.issue_type}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Created by</span>
-                <span>{wo.creator?.name ?? '—'}</span>
-              </div>
-              {wo.assignee && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Assigned to</span>
-                  <span>{wo.assignee.name}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Created</span>
-                <span className="text-xs">{formatDistanceToNow(new Date(wo.created_at), { addSuffix: true })}</span>
-              </div>
-              {wo.completed_at && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Completed</span>
-                  <span className="text-xs">{formatDistanceToNow(new Date(wo.completed_at), { addSuffix: true })}</span>
-                </div>
-              )}
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Assigned To</p>
+              <p className="font-medium">{wo.assignee?.name ?? 'Unassigned'}</p>
             </div>
-
-            {wo.description && (
-              <div className="bg-secondary/50 rounded-md p-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Description</p>
-                <p className="text-sm">{wo.description}</p>
-              </div>
-            )}
-
-            {wo.notes && (
-              <div className="bg-secondary/50 rounded-md p-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notes</p>
-                <p className="text-sm">{wo.notes}</p>
-              </div>
-            )}
-
-            {/* Quick Status Change */}
-            {wo.status !== 'completed' && (
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Update Status</p>
-                <div className="flex flex-wrap gap-2">
-                  {WO_STATUSES.filter((s) => s !== wo.status).map((s) => (
-                    <Button
-                      key={s}
-                      size="sm"
-                      variant="outline"
-                      disabled={!!updatingStatus}
-                      onClick={() => handleStatusChange(s)}
-                      className="h-7 text-xs"
-                    >
-                      {updatingStatus === s ? '...' : <WoStatusBadge status={s} />}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" className="flex-1" onClick={onClose}>Close</Button>
-              <Button
-                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-                onClick={() => { onClose(); onEdit(wo) }}
-              >
-                Edit
-              </Button>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Created By</p>
+              <p className="font-medium">{wo.creator?.name ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Due Date</p>
+              <p className="font-medium">{wo.due_date ? format(new Date(wo.due_date), 'MMM d, yyyy') : '—'}</p>
             </div>
           </div>
-        )}
+
+          {wo.description && (
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Description</p>
+              <p className="text-sm bg-background rounded-md border border-border p-3">{wo.description}</p>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div>
+              <p className="text-xs font-semibold font-mono-display mb-2 text-muted-foreground uppercase tracking-wide">Update Status</p>
+              <div className="flex flex-wrap gap-2">
+                {WO_STATUSES.map((s) => (
+                  <Button
+                    key={s.value}
+                    variant={wo.status === s.value ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => handleStatusChange(s.value as WoStatus)}
+                    disabled={updatingStatus || wo.status === s.value}
+                    className="text-xs h-7"
+                  >
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )
 }
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
-
-export default function WorkOrdersPage() {
-  const supabase = useSupabase()
-  const [workOrders, setWorkOrders] = useState<WorkOrderWithDetails[]>([])
-  const [machines, setMachines] = useState<Machine[]>([])
-  const [loading, setLoading] = useState(true)
-  const [addOpen, setAddOpen] = useState(false)
-  const [editWo, setEditWo] = useState<WorkOrderWithDetails | null>(null)
-  const [detailWo, setDetailWo] = useState<WorkOrderWithDetails | null>(null)
-  const [filterStatus, setFilterStatus] = useState<WoStatus | 'all'>('all')
-  const [filterPriority, setFilterPriority] = useState<Priority | 'all'>('all')
-  const [showFilters, setShowFilters] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any
-    const [woRes, machinesRes] = await Promise.all([
-      sb
+export default function WorkOrdersClientPage() {
+  const { data: workOrders, loading, refetch } = useSupabase<WorkOrderWithRefs>(
+    (sb) =>
+      (sb as any)
         .from('work_orders')
-        .select('*, machine:machines(name), creator:profiles!work_orders_created_by_fkey(name), assignee:profiles!work_orders_assigned_to_fkey(name)')
-        .order('created_at', { ascending: false }),
-      supabase.from('machines').select('*').order('name'),
-    ])
-    setWorkOrders((woRes.data ?? []) as WorkOrderWithDetails[])
-    setMachines(machinesRes.data ?? [])
-    setLoading(false)
-  }, [supabase])
+        .select('*, machine:machines(name,location), creator:profiles!work_orders_created_by_fkey(name), assignee:profiles!work_orders_assigned_to_fkey(name)')
+        .order('created_at', { ascending: false })
+  )
+  const { data: machines } = useSupabase<Machine>(
+    (sb) => (sb as any).from('machines').select('id,name').order('name')
+  )
+  const { data: technicians } = useSupabase<Profile>(
+    (sb) => (sb as any).from('profiles').select('id,name').order('name')
+  )
 
-  useEffect(() => {
-    fetchData()
-    const channel = supabase
-      .channel('wo-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'work_orders' }, fetchData)
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [fetchData, supabase])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [priorityFilter, setPriorityFilter] = useState<string>('all')
+  const [showCreate, setShowCreate] = useState(false)
+  const [selectedWo, setSelectedWo] = useState<WorkOrderWithRefs | null>(null)
+  const { isAdmin } = useAuth()
 
-  const filtered = workOrders.filter((wo) => {
-    if (filterStatus !== 'all' && wo.status !== filterStatus) return false
-    if (filterPriority !== 'all' && wo.priority !== filterPriority) return false
-    return true
+  const filtered = (workOrders ?? []).filter((wo) => {
+    const matchSearch =
+      wo.title.toLowerCase().includes(search.toLowerCase()) ||
+      (wo.machine?.name ?? '').toLowerCase().includes(search.toLowerCase())
+    const matchStatus = statusFilter === 'all' || wo.status === statusFilter
+    const matchPriority = priorityFilter === 'all' || wo.priority === priorityFilter
+    return matchSearch && matchStatus && matchPriority
   })
-
-  const activeFilterCount = (filterStatus !== 'all' ? 1 : 0) + (filterPriority !== 'all' ? 1 : 0)
 
   return (
     <div>
       <PageHeader
         title="Work Orders"
-        subtitle={`${filtered.length} of ${workOrders.length}`}
-        action={{ label: 'New WO', onClick: () => setAddOpen(true), icon: Plus }}
+        description={`${filtered.length} order${filtered.length !== 1 ? 's' : ''}`}
+        action={
+          isAdmin ? (
+            <Button size="sm" onClick={() => setShowCreate(true)} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 text-xs">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New WO
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* Filters */}
-      <div className="mb-4">
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowFilters(!showFilters)}
-            className="h-8 text-xs gap-1.5"
-          >
-            <Filter className="h-3 w-3" />
-            Filters
-            {activeFilterCount > 0 && (
-              <span className="bg-primary text-primary-foreground text-xs rounded-full w-4 h-4 flex items-center justify-center">
-                {activeFilterCount}
-              </span>
-            )}
-          </Button>
-          {activeFilterCount > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => { setFilterStatus('all'); setFilterPriority('all') }}
-              className="h-8 text-xs gap-1"
-            >
-              <X className="h-3 w-3" /> Clear
-            </Button>
-          )}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative flex-1 min-w-40 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-8 bg-background h-8 text-sm"
+          />
         </div>
-
-        {showFilters && (
-          <div className="mt-2 flex flex-wrap gap-3 p-3 bg-card border border-border rounded-md">
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Status</Label>
-              <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as WoStatus | 'all')}>
-                <SelectTrigger className="h-8 w-36 text-xs bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {WO_STATUSES.map((s) => <SelectItem key={s} value={s}><WoStatusBadge status={s} /></SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Priority</Label>
-              <Select value={filterPriority} onValueChange={(v) => setFilterPriority(v as Priority | 'all')}>
-                <SelectTrigger className="h-8 w-36 text-xs bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="all">All priorities</SelectItem>
-                  {PRIORITIES.map((p) => <SelectItem key={p} value={p}><PriorityBadge priority={p} /></SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        )}
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-32 h-8 text-xs bg-background">
+            <Filter className="h-3 w-3 mr-1.5" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            {WO_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="w-32 h-8 text-xs bg-background"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Priority</SelectItem>
+            {PRIORITIES.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Work Orders List */}
       {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} lines={3} />)}
-        </div>
+        <LoadingTable />
       ) : filtered.length === 0 ? (
         <EmptyState
-          title={workOrders.length === 0 ? 'No work orders yet' : 'No matching work orders'}
-          description={workOrders.length === 0 ? 'Create a work order to track machine issues' : 'Try adjusting your filters'}
-          icon={Plus}
-          action={workOrders.length === 0 ? { label: 'New Work Order', onClick: () => setAddOpen(true) } : undefined}
+          icon={ClipboardList}
+          title="No work orders found"
+          description={search || statusFilter !== 'all' ? 'Try adjusting your filters' : 'Create your first work order'}
         />
       ) : (
-        <div className="space-y-2">
-          {filtered.map((wo) => (
-            <div
-              key={wo.id}
-              onClick={() => setDetailWo(wo)}
-              className="bg-card border border-border rounded-md p-4 cursor-pointer hover:bg-secondary/20 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-mono-display text-muted-foreground">#{wo.id}</span>
-                    <span className="text-sm font-semibold font-mono-display truncate">{wo.machine?.name ?? 'Unknown'}</span>
-                    <span className="text-xs text-muted-foreground capitalize">{wo.issue_type}</span>
-                  </div>
-                  {wo.description && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{wo.description}</p>
-                  )}
-                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                    <PriorityBadge priority={wo.priority} />
-                    <WoStatusBadge status={wo.status} />
-                    <span className="text-xs text-muted-foreground">
-                      {formatDistanceToNow(new Date(wo.created_at), { addSuffix: true })}
-                    </span>
-                    {wo.assignee && (
-                      <span className="text-xs text-muted-foreground">· {wo.assignee.name}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="rounded-md border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-xs text-muted-foreground font-medium">Title</TableHead>
+                <TableHead className="text-xs text-muted-foreground font-medium">Machine</TableHead>
+                <TableHead className="text-xs text-muted-foreground font-medium">Priority</TableHead>
+                <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
+                <TableHead className="text-xs text-muted-foreground font-medium">Assigned</TableHead>
+                <TableHead className="text-xs text-muted-foreground font-medium">Due</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((wo) => (
+                <TableRow
+                  key={wo.id}
+                  className="border-border cursor-pointer hover:bg-secondary/50"
+                  onClick={() => setSelectedWo(wo)}
+                >
+                  <TableCell className="font-medium text-sm">{wo.title}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{wo.machine?.name ?? '—'}</TableCell>
+                  <TableCell><PriorityBadge priority={wo.priority} size="sm" /></TableCell>
+                  <TableCell><WoStatusBadge status={wo.status} size="sm" /></TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{wo.assignee?.name ?? '—'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {wo.due_date ? format(new Date(wo.due_date), 'MMM d') : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
 
-      <WoDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={fetchData} machines={machines} />
-      <WoDialog
-        open={!!editWo}
-        onClose={() => setEditWo(null)}
-        onSaved={fetchData}
-        wo={editWo ?? undefined}
-        machines={machines}
+      <CreateWoDialog
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={refetch}
+        machines={machines ?? []}
+        technicians={technicians ?? []}
       />
       <WoDetailDialog
-        wo={detailWo}
-        onClose={() => setDetailWo(null)}
-        onEdit={(wo) => setEditWo(wo)}
-        onStatusChange={fetchData}
+        wo={selectedWo}
+        onClose={() => setSelectedWo(null)}
+        onUpdated={refetch}
+        machines={machines ?? []}
+        technicians={technicians ?? []}
       />
     </div>
   )
