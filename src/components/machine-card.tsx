@@ -1,57 +1,118 @@
-import { Cog, AlertTriangle, CheckCircle2, WrenchIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Machine, MachineStatus } from '@/types/database'
+import { Cog } from 'lucide-react'
+import { StatusBadge } from './status-badge'
+import type { Machine } from '@/types/database'
 
 interface MachineCardProps {
   machine: Machine
-  openWoCount: number
-  onClick: () => void
+  onClick?: () => void
+  openWoCount?: number
+  compact?: boolean
 }
 
-const statusConfig: Record<MachineStatus, { label: string; color: string; icon: React.FC<{ className?: string }> }> = {
-  running: { label: 'Running', color: 'text-emerald-400', icon: CheckCircle2 },
-  maintenance_due: { label: 'Maint. Due', color: 'text-amber-400', icon: AlertTriangle },
-  down: { label: 'Down', color: 'text-red-400', icon: AlertTriangle },
+const STATUS_BORDER: Record<Machine['status'], string> = {
+  running: 'border-emerald-500/40 hover:border-emerald-500/70',
+  maintenance_due: 'border-amber-500/40 hover:border-amber-500/70',
+  breakdown: 'border-red-500/40 hover:border-red-500/70',
 }
 
-export function MachineCard({ machine, openWoCount, onClick }: MachineCardProps) {
-  const cfg = statusConfig[machine.status]
-  const StatusIcon = cfg.icon
+const STATUS_DOT: Record<Machine['status'], string> = {
+  running: 'bg-emerald-500',
+  maintenance_due: 'bg-amber-500',
+  breakdown: 'bg-red-500',
+}
+
+export function MachineCard({ machine, onClick, openWoCount, compact = false }: MachineCardProps) {
+  if (compact) {
+    return (
+      <div
+        onClick={onClick}
+        className={cn(
+          'bg-card border rounded-md p-3 cursor-pointer transition-all duration-150',
+          STATUS_BORDER[machine.status]
+        )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold font-mono-display truncate leading-tight">{machine.name}</p>
+            <p className="text-xs text-muted-foreground truncate">{machine.location}</p>
+          </div>
+          <span className={cn('h-2 w-2 rounded-full shrink-0 mt-1', STATUS_DOT[machine.status])} />
+        </div>
+        <p className="text-xs text-muted-foreground mt-1 capitalize">
+          {machine.status.replace('_', ' ')}
+        </p>
+      </div>
+    )
+  }
+
+  const specs = machine.specs as Record<string, string> | null
 
   return (
     <div
-      className="bg-card border border-border rounded-lg p-4 cursor-pointer hover:border-primary/50 transition-colors"
       onClick={onClick}
+      className={cn(
+        'bg-card border rounded-md p-4 cursor-pointer transition-all duration-150 flex flex-col gap-3',
+        STATUS_BORDER[machine.status]
+      )}
     >
-      <div className="flex gap-3">
-        {machine.photo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={machine.photo_url}
-            alt={machine.name}
-            className="h-14 w-14 rounded-md object-cover border border-border shrink-0"
-          />
-        ) : (
-          <div className="h-14 w-14 rounded-md bg-secondary flex items-center justify-center border border-border shrink-0">
-            <Cog className="h-6 w-6 text-muted-foreground" />
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-sm truncate font-body">{machine.name}</h3>
-          <p className="text-xs text-muted-foreground truncate">{machine.machine_type} · {machine.location}</p>
-
-          <div className="flex items-center gap-1 mt-1.5">
-            <StatusIcon className={cn('h-3 w-3', cfg.color)} />
-            <span className={cn('text-xs font-mono-display', cfg.color)}>{cfg.label}</span>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {machine.photo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={machine.photo_url}
+              alt={machine.name}
+              className="h-10 w-10 rounded-md object-cover shrink-0 border border-border"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center shrink-0">
+              <Cog className="h-5 w-5 text-muted-foreground" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="font-semibold font-mono-display text-sm leading-tight truncate">{machine.name}</p>
+            <p className="text-xs text-muted-foreground truncate">{machine.machine_type}</p>
           </div>
         </div>
+        <StatusBadge status={machine.status} size="sm" className="shrink-0" />
       </div>
 
-      {openWoCount > 0 && (
-        <div className="mt-3 flex items-center gap-1.5 bg-amber-500/10 rounded-sm px-2 py-1">
-          <WrenchIcon className="h-3 w-3 text-amber-400" />
-          <span className="text-xs text-amber-400 font-body">{openWoCount} open work order{openWoCount !== 1 ? 's' : ''}</span>
+      {/* Details */}
+      <div className="text-xs text-muted-foreground space-y-1">
+        <p className="flex items-center gap-1">
+          <span className="text-foreground/60">Location:</span>
+          <span className="font-medium text-foreground">{machine.location}</span>
+        </p>
+        {specs?.capacity && (
+          <p className="flex items-center gap-1">
+            <span className="text-foreground/60">Capacity:</span>
+            <span className="font-medium text-foreground">{specs.capacity}</span>
+          </p>
+        )}
+        {specs?.power && (
+          <p className="flex items-center gap-1">
+            <span className="text-foreground/60">Power:</span>
+            <span className="font-medium text-foreground">{specs.power}</span>
+          </p>
+        )}
+      </div>
+
+      {/* Footer */}
+      {openWoCount !== undefined && (
+        <div className="flex items-center justify-between pt-2 border-t border-border">
+          <span className="text-xs text-muted-foreground">Open Work Orders</span>
+          <span
+            className={cn(
+              'text-xs font-mono-display font-bold px-1.5 py-0.5 rounded-sm',
+              openWoCount > 0
+                ? 'bg-amber-500/20 text-amber-400'
+                : 'bg-emerald-500/10 text-emerald-400'
+            )}
+          >
+            {openWoCount}
+          </span>
         </div>
       )}
     </div>

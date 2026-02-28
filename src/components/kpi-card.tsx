@@ -1,37 +1,58 @@
-import { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { LucideIcon } from 'lucide-react'
 
 interface KpiCardProps {
   title: string
   value: string | number
-  subtitle?: string
   icon: LucideIcon
-  trend?: { value: number; label: string }
-  variant?: 'default' | 'success' | 'warning' | 'danger'
+  accentColor: 'green' | 'amber' | 'red' | 'blue'
+  subtitle?: string
   className?: string
 }
 
-const variantStyles = {
-  default: 'text-foreground',
-  success: 'text-emerald-400',
-  warning: 'text-amber-400',
-  danger: 'text-red-400',
+const ACCENT_STYLES = {
+  green: {
+    border: 'border-l-emerald-500',
+    icon: 'text-emerald-400',
+    iconBg: 'bg-emerald-500/10',
+  },
+  amber: {
+    border: 'border-l-amber-500',
+    icon: 'text-amber-400',
+    iconBg: 'bg-amber-500/10',
+  },
+  red: {
+    border: 'border-l-red-500',
+    icon: 'text-red-400',
+    iconBg: 'bg-red-500/10',
+  },
+  blue: {
+    border: 'border-l-blue-500',
+    icon: 'text-blue-400',
+    iconBg: 'bg-blue-500/10',
+  },
 }
 
-export function KpiCard({ title, value, subtitle, icon: Icon, trend, variant = 'default', className }: KpiCardProps) {
+export function KpiCard({ title, value, icon: Icon, accentColor, subtitle, className }: KpiCardProps) {
+  const styles = ACCENT_STYLES[accentColor]
   return (
-    <div className={cn('bg-card border border-border rounded-lg p-4 space-y-1', className)}>
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground uppercase tracking-wide font-body">{title}</p>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </div>
-      <p className={cn('text-2xl font-semibold font-mono-display', variantStyles[variant])}>{value}</p>
-      {subtitle && <p className="text-xs text-muted-foreground font-body">{subtitle}</p>}
-      {trend && (
-        <p className={cn('text-xs', trend.value >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-          {trend.value >= 0 ? '+' : ''}{trend.value}% {trend.label}
-        </p>
+    <div
+      className={cn(
+        'bg-card border border-border border-l-4 rounded-md p-4 flex items-center gap-4',
+        styles.border,
+        className
       )}
+    >
+      <div className={cn('p-2.5 rounded-md shrink-0', styles.iconBg)}>
+        <Icon className={cn('h-5 w-5', styles.icon)} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground font-body uppercase tracking-wide truncate">{title}</p>
+        <p className={cn('text-2xl font-bold font-mono-display leading-tight')}>{value}</p>
+        {subtitle && (
+          <p className="text-xs text-muted-foreground font-body mt-0.5">{subtitle}</p>
+        )}
+      </div>
     </div>
   )
 }

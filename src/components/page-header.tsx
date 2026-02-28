@@ -1,5 +1,5 @@
-import { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { LucideIcon } from 'lucide-react'
 
 interface PageHeaderProps {
   title: string
@@ -13,15 +13,22 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ title, subtitle, action }: PageHeaderProps) {
+  const Icon = action?.icon
   return (
-    <div className="flex items-start justify-between mb-6">
+    <div className="flex items-center justify-between mb-6">
       <div>
-        <h1 className="text-xl font-semibold font-mono-display">{title}</h1>
-        {subtitle && <p className="text-sm text-muted-foreground mt-0.5 font-body">{subtitle}</p>}
+        <h1 className="text-xl font-bold font-mono-display text-foreground">{title}</h1>
+        {subtitle && (
+          <p className="text-sm text-muted-foreground mt-0.5 font-body">{subtitle}</p>
+        )}
       </div>
-      {action?.show !== false && action && (
-        <Button onClick={action.onClick} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
-          {action.icon && <action.icon className="h-4 w-4 mr-1.5" />}
+      {action && action.show !== false && (
+        <Button
+          onClick={action.onClick}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 font-body font-medium shrink-0"
+          size="sm"
+        >
+          {Icon && <Icon className="h-4 w-4 mr-1.5" />}
           {action.label}
         </Button>
       )}
