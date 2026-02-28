@@ -1,11 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { PageHeader } from '@/components/page-header'
-import { LoadingSkeleton } from '@/components/loading-skeleton'
-import { EmptyState } from '@/components/empty-state'
+export const dynamic = 'force-dynamic'
+
+import { useEffect, useState, useCallback } from 'react'
+import { useSupabase } from '@/hooks/use-supabase'
+import { useToast } from '@/hooks/use-toast'
+import { Plus, Clock, AlertCircle } from 'lucide-react'
+import { format, formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -13,7 +16,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   Select,
@@ -22,242 +25,290 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { useToast } from '@/hooks/use-toast'
-import { AlertTriangle, Plus, StopCircle } from 'lucide-react'
-import { DOWNTIME_REASONS } from '@/lib/constants'
-import type { DowntimeLog, Machine } from '@/types/database'
-import { format, formatDuration, intervalToDuration } from 'date-fns'
+import { CardSkeleton } from '@/components/loading-skeleton'
+import { EmptyState } from '@/components/empty-state'
+import type { Machine, DowntimeLog } from '@/types/database'
+
+type DowntimeLogWithMachine = DowntimeLog & {
+  machine: { name: string } | null
+  reporter: { name: string } | null
+}
 
 export default function DowntimePage() {
-  const [logs, setLogs] = useState<(DowntimeLog & { machines: Pick<Machine, 'name'> | null })[]>([])
+  const [logs, setLogs] = useState<DowntimeLogWithMachine[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({
-    machine_id: '',
-    reason: '',
-    notes: '',
-  })
-  const [now, setNow] = useState(new Date())
-  const supabase = createClient()
+  const [submitting, setSubmitting] = useState(false)
+  const supabase = useSupabase()
   const { toast } = useToast()
 
-  // Live clock for active downtime duration
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(interval)
-  }, [])
+  const [form, setForm] = useState({
+    machine_id: '',
+    start_time: '',
+    end_time: '',
+    cause: '',
+    notes: '',
+  })
 
-  const load = useCallback(async () => {
-    const [logRes, machRes] = await Promise.all([
-      supabase
+  const fetchData = useCallback(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = supabase as any
+    const [logsRes, machinesRes] = await Promise.all([
+      sb
         .from('downtime_logs')
-        .select('*, machines(name)')
-        .order('start_time', { ascending: false })
-        .limit(50),
-      supabase.from('machines').select('*').order('name'),
+        .select('*, machine:machines(name), reporter:users!downtime_logs_reported_by_fkey(name)')
+        .order('start_time', { ascending: false }),
+      sb.from('machines').select('id, name').order('name'),
     ])
-    if (logRes.data) setLogs(logRes.data as any)
-    if (machRes.data) setMachines(machRes.data)
-    setLoading(false)
+    if (logsRes.error) throw logsRes.error
+    if (machinesRes.error) throw machinesRes.error
+    setLogs(logsRes.data || [])
+    setMachines(machinesRes.data || [])
   }, [supabase])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    fetchData()
+      .catch((err) => toast({ title: 'Error', description: err.message, variant: 'destructive' }))
+      .finally(() => setLoading(false))
+  }, [fetchData, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSaving(true)
+    setSubmitting(true)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sb = supabase as any
 
-    // Update machine status to breakdown
-    await supabase
-      .from('machines')
-      .update({ status: 'breakdown' })
-      .eq('id', form.machine_id)
+      const { data: userData } = await sb.auth.getUser()
+      const userId = userData?.user?.id
 
-    const { error } = await supabase.from('downtime_logs').insert([{
-      ...form,
-      start_time: new Date().toISOString(),
-    }])
+      if (!userId) throw new Error('Not authenticated')
 
-    if (error) {
-      toast({ title: 'Error logging downtime', description: error.message, variant: 'destructive' })
-    } else {
-      toast({ title: 'Downtime logged!' })
+      const { data: userRow } = await sb
+        .from('users')
+        .select('id')
+        .eq('auth_id', userId)
+        .single()
+
+      const startTime = new Date(form.start_time)
+      const endTime = form.end_time ? new Date(form.end_time) : null
+      const durationMinutes = endTime
+        ? Math.round((endTime.getTime() - startTime.getTime()) / 60000)
+        : null
+
+      const { error } = await sb.from('downtime_logs').insert({
+        machine_id: parseInt(form.machine_id),
+        start_time: startTime.toISOString(),
+        end_time: endTime?.toISOString() || null,
+        duration_minutes: durationMinutes,
+        cause: form.cause || null,
+        notes: form.notes || null,
+        reported_by: userRow?.id || null,
+      })
+
+      if (error) throw error
+
+      toast({ title: 'Downtime logged successfully' })
       setOpen(false)
-      setForm({ machine_id: '', reason: '', notes: '' })
-      load()
+      setForm({ machine_id: '', start_time: '', end_time: '', cause: '', notes: '' })
+      await fetchData()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to log downtime'
+      toast({ title: 'Error', description: message, variant: 'destructive' })
+    } finally {
+      setSubmitting(false)
     }
-    setSaving(false)
   }
 
-  const endDowntime = async (log: DowntimeLog) => {
-    const endTime = new Date().toISOString()
-    const durationMinutes = Math.floor(
-      (new Date().getTime() - new Date(log.start_time).getTime()) / 60000
-    )
-
-    await supabase
-      .from('downtime_logs')
-      .update({ end_time: endTime, duration_minutes: durationMinutes })
-      .eq('id', log.id)
-
-    await supabase
-      .from('machines')
-      .update({ status: 'running' })
-      .eq('id', log.machine_id)
-
-    toast({ title: 'Downtime ended!' })
-    load()
-  }
-
-  const getDuration = (log: DowntimeLog) => {
-    const end = log.end_time ? new Date(log.end_time) : now
-    const duration = intervalToDuration({ start: new Date(log.start_time), end })
-    return formatDuration(duration, { format: ['hours', 'minutes'] }) || '< 1 min'
-  }
+  const totalDowntimeMinutes = logs.reduce((sum, log) => sum + (log.duration_minutes || 0), 0)
+  const totalDowntimeHours = Math.round(totalDowntimeMinutes / 60)
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <PageHeader
-        title="Downtime Tracking"
-        description="Log and track machine downtime events"
-        action={
-          <Button onClick={() => setOpen(true)} size="sm" variant="destructive">
-            <Plus className="h-4 w-4 mr-1" /> Log Downtime
-          </Button>
-        }
-      />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Downtime Logs</h1>
+          <p className="text-muted-foreground">Track and analyze machine downtime</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Log Downtime
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Log Downtime Event</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="machine">Machine *</Label>
+                <Select
+                  value={form.machine_id}
+                  onValueChange={(v) => setForm((f) => ({ ...f, machine_id: v }))}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select machine" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {machines.map((m) => (
+                      <SelectItem key={m.id} value={String(m.id)}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="start_time">Start Time *</Label>
+                <Input
+                  id="start_time"
+                  type="datetime-local"
+                  value={form.start_time}
+                  onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="end_time">End Time</Label>
+                <Input
+                  id="end_time"
+                  type="datetime-local"
+                  value={form.end_time}
+                  onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cause">Cause</Label>
+                <Input
+                  id="cause"
+                  value={form.cause}
+                  onChange={(e) => setForm((f) => ({ ...f, cause: e.target.value }))}
+                  placeholder="e.g., Mechanical failure, Power outage"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Additional details..."
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving...' : 'Log Downtime'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
-      {loading ? (
-        <LoadingSkeleton />
-      ) : logs.length === 0 ? (
-        <EmptyState
-          icon={<AlertTriangle className="h-8 w-8" />}
-          title="No downtime recorded"
-          description="Log a downtime event when a machine goes down"
-          action={
-            <Button variant="destructive" onClick={() => setOpen(true)}>Log Downtime</Button>
-          }
-        />
-      ) : (
-        <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Machine</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {logs.map((log) => (
-                <TableRow key={log.id}>
-                  <TableCell className="font-medium">{log.machines?.name || 'Unknown'}</TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="text-sm font-medium">{log.reason}</p>
-                      {log.notes && <p className="text-xs text-slate-500 truncate max-w-[150px]">{log.notes}</p>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {format(new Date(log.start_time), 'MMM d, HH:mm')}
-                  </TableCell>
-                  <TableCell className="text-sm font-mono">{getDuration(log)}</TableCell>
-                  <TableCell>
-                    {log.end_time ? (
-                      <Badge variant="secondary">Resolved</Badge>
-                    ) : (
-                      <Badge variant="destructive" className="animate-pulse">Active</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {!log.end_time && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => endDowntime(log)}
-                        className="gap-1"
-                      >
-                        <StopCircle className="h-3 w-3" /> End
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+      {/* Summary Card */}
+      {!loading && logs.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-lg border bg-card p-4">
+            <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+              <Clock className="h-4 w-4" />
+              Total Downtime
+            </div>
+            <p className="text-2xl font-bold">{totalDowntimeHours}h</p>
+            <p className="text-xs text-muted-foreground">{totalDowntimeMinutes} minutes total</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+              <AlertCircle className="h-4 w-4" />
+              Total Events
+            </div>
+            <p className="text-2xl font-bold">{logs.length}</p>
+            <p className="text-xs text-muted-foreground">Downtime incidents logged</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+              <Clock className="h-4 w-4" />
+              Avg Duration
+            </div>
+            <p className="text-2xl font-bold">
+              {logs.length > 0 ? Math.round(totalDowntimeMinutes / logs.length) : 0}m
+            </p>
+            <p className="text-xs text-muted-foreground">Per incident</p>
+          </div>
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Log Downtime Event</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Machine *</Label>
-              <Select
-                value={form.machine_id}
-                onValueChange={(v) => setForm({ ...form, machine_id: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select machine" />
-                </SelectTrigger>
-                <SelectContent>
-                  {machines.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Logs List */}
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} />)}
+        </div>
+      ) : logs.length === 0 ? (
+        <EmptyState
+          icon={Clock}
+          title="No downtime logs"
+          description="Log your first downtime event to start tracking"
+          action={
+            <Button onClick={() => setOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Log Downtime
+            </Button>
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {logs.map((log) => (
+            <div key={log.id} className="rounded-lg border bg-card p-4">
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{log.machine?.name || 'Unknown Machine'}</span>
+                    {!log.end_time && (
+                      <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded-full">
+                        Ongoing
+                      </span>
+                    )}
+                  </div>
+                  {log.cause && (
+                    <p className="text-sm text-muted-foreground">Cause: {log.cause}</p>
+                  )}
+                  {log.notes && (
+                    <p className="text-sm text-muted-foreground">{log.notes}</p>
+                  )}
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span>Started: {format(new Date(log.start_time), 'MMM d, yyyy HH:mm')}</span>
+                    {log.end_time && (
+                      <span>Ended: {format(new Date(log.end_time), 'MMM d, yyyy HH:mm')}</span>
+                    )}
+                    {log.reporter && <span>By: {log.reporter.name}</span>}
+                  </div>
+                </div>
+                <div className="text-right">
+                  {log.duration_minutes != null ? (
+                    <>
+                      <p className="font-semibold">{log.duration_minutes}m</p>
+                      <p className="text-xs text-muted-foreground">
+                        {Math.round(log.duration_minutes / 60 * 10) / 10}h
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {formatDistanceToNow(new Date(log.start_time), { addSuffix: false })} ago
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Reason *</Label>
-              <Select
-                value={form.reason}
-                onValueChange={(v) => setForm({ ...form, reason: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select reason" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DOWNTIME_REASONS.map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Additional details..."
-                rows={3}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving} variant="destructive">
-                {saving ? 'Logging...' : 'Log Downtime'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { PageHeader } from '@/components/page-header'
-import { LoadingSkeleton } from '@/components/loading-skeleton'
-import { EmptyState } from '@/components/empty-state'
+export const dynamic = 'force-dynamic'
+
+import { useEffect, useState, useCallback } from 'react'
+import { useSupabase } from '@/hooks/use-supabase'
+import { useToast } from '@/hooks/use-toast'
+import { Plus, CheckCircle, AlertTriangle } from 'lucide-react'
+import { format, addDays } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,7 +16,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   Select,
@@ -23,230 +25,292 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { useToast } from '@/hooks/use-toast'
-import { Calendar, Plus, AlertTriangle, CheckCircle } from 'lucide-react'
-import { PM_FREQUENCIES } from '@/lib/constants'
-import type { PmSchedule, Machine } from '@/types/database'
-import { format, formatDistanceToNow, isPast } from 'date-fns'
+import { CardSkeleton } from '@/components/loading-skeleton'
+import { EmptyState } from '@/components/empty-state'
+import type { Machine, PmSchedule } from '@/types/database'
+
+type PmScheduleWithMachine = PmSchedule & {
+  machine: { name: string } | null
+}
 
 export default function PmSchedulePage() {
-  const [schedules, setSchedules] = useState<(PmSchedule & { machines: Pick<Machine, 'name'> | null })[]>([])
+  const [schedules, setSchedules] = useState<PmScheduleWithMachine[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({
-    machine_id: '',
-    task_description: '',
-    frequency_days: 30,
-    next_due_date: '',
-  })
-  const supabase = createClient()
+  const [submitting, setSubmitting] = useState(false)
+  const supabase = useSupabase()
   const { toast } = useToast()
 
-  const load = useCallback(async () => {
-    const [schRes, machRes] = await Promise.all([
-      supabase
+  const [form, setForm] = useState({
+    machine_id: '',
+    task_name: '',
+    frequency_days: '30',
+    last_done_at: '',
+    notes: '',
+  })
+
+  const fetchData = useCallback(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = supabase as any
+    const [schedulesRes, machinesRes] = await Promise.all([
+      sb
         .from('pm_schedules')
-        .select('*, machines(name)')
-        .eq('is_active', true)
-        .order('next_due_date'),
-      supabase.from('machines').select('*').order('name'),
+        .select('*, machine:machines(name)')
+        .order('next_due_at', { ascending: true }),
+      sb.from('machines').select('id, name').order('name'),
     ])
-    if (schRes.data) setSchedules(schRes.data as any)
-    if (machRes.data) setMachines(machRes.data)
-    setLoading(false)
+    if (schedulesRes.error) throw schedulesRes.error
+    if (machinesRes.error) throw machinesRes.error
+    setSchedules(schedulesRes.data || [])
+    setMachines(machinesRes.data || [])
   }, [supabase])
 
   useEffect(() => {
-    load()
-  }, [load])
+    fetchData()
+      .catch((err) => toast({ title: 'Error', description: err.message, variant: 'destructive' }))
+      .finally(() => setLoading(false))
+  }, [fetchData, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSaving(true)
-    const { error } = await supabase.from('pm_schedules').insert([form])
-    if (error) {
-      toast({ title: 'Error saving PM schedule', description: error.message, variant: 'destructive' })
-    } else {
-      toast({ title: 'PM schedule created!' })
+    setSubmitting(true)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sb = supabase as any
+
+      const lastDoneAt = form.last_done_at ? new Date(form.last_done_at) : new Date()
+      const nextDueAt = addDays(lastDoneAt, parseInt(form.frequency_days))
+
+      const { error } = await sb.from('pm_schedules').insert({
+        machine_id: parseInt(form.machine_id),
+        task_name: form.task_name,
+        frequency_days: parseInt(form.frequency_days),
+        last_done_at: lastDoneAt.toISOString(),
+        next_due_at: nextDueAt.toISOString(),
+        notes: form.notes || null,
+      })
+
+      if (error) throw error
+
+      toast({ title: 'PM Schedule created successfully' })
       setOpen(false)
-      setForm({ machine_id: '', task_description: '', frequency_days: 30, next_due_date: '' })
+      setForm({ machine_id: '', task_name: '', frequency_days: '30', last_done_at: '', notes: '' })
+      await fetchData()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to create schedule'
+      toast({ title: 'Error', description: message, variant: 'destructive' })
+    } finally {
+      setSubmitting(false)
     }
-    setSaving(false)
   }
 
-  const markComplete = async (id: string, freqDays: number) => {
-    const nextDue = new Date()
-    nextDue.setDate(nextDue.getDate() + freqDays)
-    const { error } = await supabase
-      .from('pm_schedules')
-      .update({
-        last_completed_date: new Date().toISOString(),
-        next_due_date: nextDue.toISOString(),
-      })
-      .eq('id', id)
-    if (error) {
-      toast({ title: 'Error updating PM', variant: 'destructive' })
-    } else {
-      toast({ title: 'PM marked complete!' })
-      load()
+  const handleMarkDone = async (schedule: PmScheduleWithMachine) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sb = supabase as any
+      const now = new Date()
+      const nextDue = addDays(now, schedule.frequency_days)
+
+      const { error } = await sb
+        .from('pm_schedules')
+        .update({
+          last_done_at: now.toISOString(),
+          next_due_at: nextDue.toISOString(),
+        })
+        .eq('id', schedule.id)
+
+      if (error) throw error
+      toast({ title: 'PM marked as done' })
+      await fetchData()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update schedule'
+      toast({ title: 'Error', description: message, variant: 'destructive' })
     }
   }
+
+  const now = new Date()
+  const overdueSchedules = schedules.filter((s) => new Date(s.next_due_at) < now)
+  const upcomingSchedules = schedules.filter((s) => new Date(s.next_due_at) >= now)
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <PageHeader
-        title="PM Schedule"
-        description="Preventive maintenance schedules"
-        action={
-          <Button onClick={() => setOpen(true)} size="sm">
-            <Plus className="h-4 w-4 mr-1" /> Add PM Task
-          </Button>
-        }
-      />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">PM Schedule</h1>
+          <p className="text-muted-foreground">Manage preventive maintenance schedules</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Schedule
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create PM Schedule</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Machine *</Label>
+                <Select
+                  value={form.machine_id}
+                  onValueChange={(v) => setForm((f) => ({ ...f, machine_id: v }))}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select machine" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {machines.map((m) => (
+                      <SelectItem key={m.id} value={String(m.id)}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="task_name">Task Name *</Label>
+                <Input
+                  id="task_name"
+                  value={form.task_name}
+                  onChange={(e) => setForm((f) => ({ ...f, task_name: e.target.value }))}
+                  placeholder="e.g., Oil change, Filter replacement"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="frequency">Frequency (days) *</Label>
+                <Input
+                  id="frequency"
+                  type="number"
+                  min="1"
+                  value={form.frequency_days}
+                  onChange={(e) => setForm((f) => ({ ...f, frequency_days: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="last_done">Last Done At</Label>
+                <Input
+                  id="last_done"
+                  type="datetime-local"
+                  value={form.last_done_at}
+                  onChange={(e) => setForm((f) => ({ ...f, last_done_at: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? 'Saving...' : 'Create Schedule'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
       {loading ? (
-        <LoadingSkeleton />
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} />)}
+        </div>
       ) : schedules.length === 0 ? (
         <EmptyState
-          icon={<Calendar className="h-8 w-8" />}
+          icon={CheckCircle}
           title="No PM schedules"
-          description="Create preventive maintenance tasks for your machines"
-          action={<Button onClick={() => setOpen(true)}>Add PM Task</Button>}
+          description="Create your first preventive maintenance schedule"
+          action={
+            <Button onClick={() => setOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Schedule
+            </Button>
+          }
         />
       ) : (
-        <div className="rounded-lg border bg-white overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Machine</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>Frequency</TableHead>
-                <TableHead>Next Due</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {schedules.map((pm) => {
-                const overdue = isPast(new Date(pm.next_due_date))
-                return (
-                  <TableRow key={pm.id}>
-                    <TableCell className="font-medium">{pm.machines?.name || 'Unknown'}</TableCell>
-                    <TableCell className="max-w-[200px]">
-                      <p className="text-sm truncate">{pm.task_description}</p>
-                    </TableCell>
-                    <TableCell className="text-sm">{pm.frequency_days} days</TableCell>
-                    <TableCell className="text-sm">
-                      <div>
-                        <p>{format(new Date(pm.next_due_date), 'MMM d, yyyy')}</p>
-                        <p className={`text-xs ${overdue ? 'text-red-500' : 'text-slate-400'}`}>
-                          {formatDistanceToNow(new Date(pm.next_due_date), { addSuffix: true })}
+        <div className="space-y-6">
+          {overdueSchedules.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-destructive mb-3 flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Overdue ({overdueSchedules.length})
+              </h2>
+              <div className="space-y-3">
+                {overdueSchedules.map((s) => (
+                  <div key={s.id} className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1">
+                        <p className="font-medium">{s.task_name}</p>
+                        <p className="text-sm text-muted-foreground">{s.machine?.name}</p>
+                        <p className="text-xs text-destructive">
+                          Due: {format(new Date(s.next_due_at), 'MMM d, yyyy')}
                         </p>
+                        {s.last_done_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Last done: {format(new Date(s.last_done_at), 'MMM d, yyyy')}
+                          </p>
+                        )}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      {overdue ? (
-                        <Badge variant="destructive" className="gap-1">
-                          <AlertTriangle className="h-3 w-3" /> Overdue
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="gap-1">
-                          <CheckCircle className="h-3 w-3" /> On Track
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => markComplete(pm.id, pm.frequency_days)}
-                      >
-                        Mark Done
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Every {s.frequency_days}d</span>
+                        <Button size="sm" variant="outline" onClick={() => handleMarkDone(s)}>
+                          <CheckCircle className="mr-1 h-3 w-3" />
+                          Mark Done
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {upcomingSchedules.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold mb-3">Upcoming</h2>
+              <div className="space-y-3">
+                {upcomingSchedules.map((s) => (
+                  <div key={s.id} className="rounded-lg border bg-card p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1">
+                        <p className="font-medium">{s.task_name}</p>
+                        <p className="text-sm text-muted-foreground">{s.machine?.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Due: {format(new Date(s.next_due_at), 'MMM d, yyyy')}
+                        </p>
+                        {s.last_done_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Last done: {format(new Date(s.last_done_at), 'MMM d, yyyy')}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Every {s.frequency_days}d</span>
+                        <Button size="sm" variant="outline" onClick={() => handleMarkDone(s)}>
+                          <CheckCircle className="mr-1 h-3 w-3" />
+                          Mark Done
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add PM Schedule</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Machine *</Label>
-              <Select
-                value={form.machine_id}
-                onValueChange={(v) => setForm({ ...form, machine_id: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select machine" />
-                </SelectTrigger>
-                <SelectContent>
-                  {machines.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Task Description *</Label>
-              <Textarea
-                value={form.task_description}
-                onChange={(e) => setForm({ ...form, task_description: e.target.value })}
-                placeholder="e.g. Lubricate bearings and check belt tension"
-                rows={3}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Frequency</Label>
-              <Select
-                value={String(form.frequency_days)}
-                onValueChange={(v) => setForm({ ...form, frequency_days: Number(v) })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PM_FREQUENCIES.map((f) => (
-                    <SelectItem key={f.days} value={String(f.days)}>{f.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>First Due Date *</Label>
-              <Input
-                type="date"
-                value={form.next_due_date}
-                onChange={(e) => setForm({ ...form, next_due_date: e.target.value })}
-                required
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create Schedule'}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

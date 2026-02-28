@@ -1,8 +1,10 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,39 +17,46 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
   const { toast } = useToast()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      )
 
-    if (error) {
-      toast({
-        title: 'Login failed',
-        description: error.message,
-        variant: 'destructive',
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       })
-    } else {
+
+      if (error) throw error
+
       router.push('/')
       router.refresh()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed'
+      toast({
+        title: 'Login failed',
+        description: message,
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="p-3 bg-blue-600 rounded-full">
-              <Wrench className="h-8 w-8 text-white" />
+            <div className="p-3 rounded-full bg-primary/10">
+              <Wrench className="h-8 w-8 text-primary" />
             </div>
           </div>
           <CardTitle className="text-2xl">Tokka MMS</CardTitle>
@@ -60,9 +69,9 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@tokka.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com"
                 required
               />
             </div>
@@ -71,9 +80,9 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
                 required
               />
             </div>

@@ -1,192 +1,279 @@
-import { createClient } from '@/lib/supabase/server'
-import { KpiCard } from '@/components/kpi-card'
-import { StatusBadge } from '@/components/status-badge'
-import { WoStatusBadge } from '@/components/wo-status-badge'
-import { formatDistanceToNow } from 'date-fns'
-import {
-  Cog,
-  ClipboardList,
-  AlertTriangle,
-  Clock,
-  Activity,
-  CheckCircle2,
-} from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import Link from 'next/link'
+'use client'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
-  const supabase = createClient()
+import { useEffect, useState, useCallback } from 'react'
+import { useSupabase } from '@/hooks/use-supabase'
+import { useToast } from '@/hooks/use-toast'
+import { Activity, ClipboardList, AlertTriangle, Clock } from 'lucide-react'
+import { formatDistanceToNow, format, startOfMonth, endOfMonth } from 'date-fns'
+import { KpiCard } from '@/components/kpi-card'
+import { MachineCard } from '@/components/machine-card'
+import { PriorityBadge } from '@/components/priority-badge'
+import { WoStatusBadge } from '@/components/wo-status-badge'
+import { KpiCardSkeleton, CardSkeleton } from '@/components/loading-skeleton'
+import { EmptyState } from '@/components/empty-state'
+import { Button } from '@/components/ui/button'
+import type { Machine, WorkOrder, PmSchedule } from '@/types/database'
 
-  const [machinesRes, workOrdersRes, pmRes, downtimeRes] = await Promise.all([
-    supabase.from('machines').select('*').order('name'),
-    supabase
-      .from('work_orders')
-      .select('*, machines(name)')
-      .neq('status', 'closed')
-      .order('created_at', { ascending: false })
-      .limit(5),
-    supabase
-      .from('pm_schedules')
-      .select('*, machines(name)')
-      .eq('is_active', true)
-      .order('next_due_date'),
-    supabase
-      .from('downtime_logs')
-      .select('*')
-      .is('end_time', null)
-      .order('start_time', { ascending: false }),
-  ])
+type WorkOrderWithMachine = WorkOrder & {
+  machine: { name: string } | null
+  creator: { name: string } | null
+  assignee: { name: string } | null
+}
 
-  const machines = machinesRes.data || []
-  const workOrders = workOrdersRes.data || []
-  const pmSchedules = pmRes.data || []
-  const activeDowntime = downtimeRes.data || []
+type PmScheduleWithMachine = PmSchedule & {
+  machine: { name: string } | null
+}
 
-  const machineStats = {
-    total: machines.length,
-    running: machines.filter((m) => m.status === 'running').length,
-    maintenance_due: machines.filter((m) => m.status === 'maintenance_due').length,
-    breakdown: machines.filter((m) => m.status === 'breakdown').length,
+interface DashboardData {
+  machines: Machine[]
+  openWorkOrders: WorkOrderWithMachine[]
+  overduePm: PmScheduleWithMachine[]
+  downtimeHoursThisMonth: number
+  recentWorkOrders: WorkOrderWithMachine[]
+  openWoCountByMachine: Record<number, number>
+}
+
+export default function DashboardPage() {
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const supabase = useSupabase()
+  const { toast } = useToast()
+
+  const fetchDashboard = useCallback(async () => {
+    const now = new Date()
+    const monthStart = startOfMonth(now).toISOString()
+    const monthEnd = endOfMonth(now).toISOString()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = supabase as any
+
+    const [machinesRes, openWoRes, overduePmRes, downtimeRes, recentWoRes] =
+      await Promise.all([
+        sb.from('machines').select('*').order('name'),
+        sb
+          .from('work_orders')
+          .select(
+            'id, wo_number, title, priority, status, created_at, machine:machines(name), creator:users!work_orders_created_by_fkey(name), assignee:users!work_orders_assigned_to_fkey(name)'
+          )
+          .in('status', ['open', 'in_progress'])
+          .order('created_at', { ascending: false }),
+        sb
+          .from('pm_schedules')
+          .select('id, task_name, frequency_days, last_done_at, next_due_at, machine:machines(name)')
+          .lt('next_due_at', new Date().toISOString())
+          .order('next_due_at', { ascending: true }),
+        sb
+          .from('downtime_logs')
+          .select('duration_minutes')
+          .gte('start_time', monthStart)
+          .lte('start_time', monthEnd),
+        sb
+          .from('work_orders')
+          .select(
+            'id, wo_number, title, priority, status, created_at, machine:machines(name), creator:users!work_orders_created_by_fkey(name), assignee:users!work_orders_assigned_to_fkey(name)'
+          )
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ])
+
+    if (machinesRes.error) throw machinesRes.error
+    if (openWoRes.error) throw openWoRes.error
+    if (overduePmRes.error) throw overduePmRes.error
+    if (downtimeRes.error) throw downtimeRes.error
+    if (recentWoRes.error) throw recentWoRes.error
+
+    const totalDowntimeMinutes = (downtimeRes.data || []).reduce(
+      (sum: number, row: { duration_minutes: number }) => sum + (row.duration_minutes || 0),
+      0
+    )
+
+    const openWoCountByMachine: Record<number, number> = {}
+    ;(openWoRes.data || []).forEach((wo: WorkOrderWithMachine & { machine_id: number }) => {
+      openWoCountByMachine[wo.machine_id] = (openWoCountByMachine[wo.machine_id] || 0) + 1
+    })
+
+    setData({
+      machines: machinesRes.data || [],
+      openWorkOrders: openWoRes.data || [],
+      overduePm: overduePmRes.data || [],
+      downtimeHoursThisMonth: Math.round(totalDowntimeMinutes / 60),
+      recentWorkOrders: recentWoRes.data || [],
+      openWoCountByMachine,
+    })
+  }, [supabase])
+
+  useEffect(() => {
+    fetchDashboard()
+      .catch((err) => {
+        setError(err.message || 'Failed to load dashboard')
+        toast({ title: 'Error', description: err.message, variant: 'destructive' })
+      })
+      .finally(() => setLoading(false))
+  }, [fetchDashboard, toast])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your maintenance operations</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <KpiCardSkeleton key={i} />
+          ))}
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <CardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    )
   }
 
-  const overdueCount = pmSchedules.filter(
-    (pm) => new Date(pm.next_due_date) < new Date()
-  ).length
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        </div>
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load dashboard"
+          description={error}
+          action={
+            <Button onClick={() => { setLoading(true); setError(null); fetchDashboard().catch(e => setError(e.message)).finally(() => setLoading(false)) }}>
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
+
+  const { machines, openWorkOrders, overduePm, downtimeHoursThisMonth, recentWorkOrders, openWoCountByMachine } = data!
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1">Plant overview — real-time status</p>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground">Overview of your maintenance operations</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           title="Total Machines"
-          value={machineStats.total}
-          icon={<Cog className="h-5 w-5" />}
-          color="blue"
+          value={machines.length}
+          icon={Activity}
+          description="Registered in system"
         />
         <KpiCard
           title="Open Work Orders"
-          value={workOrders.length}
-          icon={<ClipboardList className="h-5 w-5" />}
-          color="orange"
+          value={openWorkOrders.length}
+          icon={ClipboardList}
+          description="Pending or in progress"
+          trend={openWorkOrders.length > 5 ? 'up' : 'neutral'}
         />
         <KpiCard
           title="Overdue PM"
-          value={overdueCount}
-          icon={<AlertTriangle className="h-5 w-5" />}
-          color="red"
+          value={overduePm.length}
+          icon={AlertTriangle}
+          description="Past due date"
+          trend={overduePm.length > 0 ? 'up' : 'neutral'}
+          className={overduePm.length > 0 ? 'border-destructive/50' : ''}
         />
         <KpiCard
-          title="Active Downtime"
-          value={activeDowntime.length}
-          icon={<Activity className="h-5 w-5" />}
-          color="purple"
+          title="Downtime This Month"
+          value={`${downtimeHoursThisMonth}h`}
+          icon={Clock}
+          description={`${format(new Date(), 'MMMM yyyy')}`}
         />
       </div>
 
-      {/* Machine Status Grid */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Machine Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* Machines Grid */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4">Machines</h2>
+        {machines.length === 0 ? (
+          <EmptyState
+            icon={Activity}
+            title="No machines registered"
+            description="Add your first machine to get started"
+          />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {machines.map((machine) => (
-              <div
+              <MachineCard
                 key={machine.id}
-                className="flex items-center justify-between p-3 rounded-lg border bg-slate-50"
-              >
-                <div>
-                  <p className="font-medium text-sm text-slate-900">{machine.name}</p>
-                  <p className="text-xs text-slate-500">{machine.location}</p>
-                </div>
-                <StatusBadge status={machine.status} />
-              </div>
+                machine={machine}
+                openWoCount={openWoCountByMachine[machine.id] || 0}
+              />
             ))}
           </div>
-          {machines.length === 0 && (
-            <p className="text-sm text-slate-500 text-center py-4">No machines registered</p>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Bottom Section */}
+      <div className="grid gap-6 md:grid-cols-2">
         {/* Recent Work Orders */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Open Work Orders</CardTitle>
-              <Link href="/work-orders" className="text-xs text-blue-600 hover:underline">
-                View all
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {workOrders.map((wo) => (
-              <div key={wo.id} className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">
-                    {(wo.machines as any)?.name || 'Unknown Machine'}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate">{wo.issue_description}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {formatDistanceToNow(new Date(wo.created_at), { addSuffix: true })}
-                  </p>
-                </div>
-                <WoStatusBadge status={wo.status} />
-              </div>
-            ))}
-            {workOrders.length === 0 && (
-              <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                All caught up!
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Overdue PM */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Overdue PM Schedules</CardTitle>
-              <Link href="/pm-schedule" className="text-xs text-blue-600 hover:underline">
-                View all
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {pmSchedules
-              .filter((pm) => new Date(pm.next_due_date) < new Date())
-              .slice(0, 5)
-              .map((pm) => (
-                <div key={pm.id} className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-900">
-                      {(pm.machines as any)?.name}
+        <div>
+          <h2 className="text-xl font-semibold mb-4">Recent Work Orders</h2>
+          {recentWorkOrders.length === 0 ? (
+            <EmptyState
+              icon={ClipboardList}
+              title="No work orders yet"
+              description="Create your first work order"
+            />
+          ) : (
+            <div className="space-y-3">
+              {recentWorkOrders.map((wo) => (
+                <div key={wo.id} className="flex items-start justify-between p-3 rounded-lg border bg-card">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono text-muted-foreground">{wo.wo_number}</span>
+                      <PriorityBadge priority={wo.priority} />
+                    </div>
+                    <p className="text-sm font-medium">{wo.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {wo.machine?.name} &bull; {formatDistanceToNow(new Date(wo.created_at), { addSuffix: true })}
                     </p>
-                    <p className="text-xs text-slate-500 truncate">{pm.task_description}</p>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-red-500 whitespace-nowrap">
-                    <Clock className="h-3 w-3" />
-                    {formatDistanceToNow(new Date(pm.next_due_date), { addSuffix: true })}
-                  </div>
+                  <WoStatusBadge status={wo.status} />
                 </div>
               ))}
-            {overdueCount === 0 && (
-              <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-                No overdue tasks!
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
+          )}
+        </div>
+
+        {/* Overdue PM */}
+        <div>
+          <h2 className="text-xl font-semibold mb-4">Overdue Preventive Maintenance</h2>
+          {overduePm.length === 0 ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="No overdue PM"
+              description="All scheduled maintenance is up to date"
+            />
+          ) : (
+            <div className="space-y-3">
+              {overduePm.map((pm) => (
+                <div key={pm.id} className="flex items-start justify-between p-3 rounded-lg border border-destructive/30 bg-destructive/5">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">{pm.task_name}</p>
+                    <p className="text-xs text-muted-foreground">{pm.machine?.name}</p>
+                    <p className="text-xs text-destructive">
+                      Due: {format(new Date(pm.next_due_at), 'MMM d, yyyy')}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">Every {pm.frequency_days}d</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
