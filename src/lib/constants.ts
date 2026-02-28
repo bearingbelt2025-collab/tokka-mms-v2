@@ -1,28 +1,38 @@
-export const MACHINE_STATUSES = ['running', 'maintenance_due', 'down'] as const
-
 export const ISSUE_TYPES = [
-  'Electrical',
-  'Mechanical',
-  'Hydraulic',
-  'Pneumatic',
-  'Software',
-  'Lubrication',
+  'Bearing Failure',
+  'Belt Wear',
   'Calibration',
-  'Cleaning',
-  'Inspection',
+  'Conveyor Jam',
+  'Die Replacement',
+  'Electrical',
+  'Lubrication Required',
+  'Motor Overheating',
+  'Noise',
+  'Sensor Malfunction',
+  'Vibration',
   'Other',
 ] as const
 
 export const PRIORITIES = ['low', 'medium', 'high', 'critical'] as const
+export const WORK_ORDER_STATUSES = ['open', 'assigned', 'in_progress', 'completed'] as const
+export const MACHINE_STATUSES = ['running', 'maintenance_due', 'breakdown'] as const
 
-export const WORK_ORDER_STATUSES = ['open', 'in_progress', 'pending_parts', 'completed'] as const
+export const PRIORITY_COLORS = {
+  low: 'bg-slate-500',
+  medium: 'bg-blue-500',
+  high: 'bg-amber-500',
+  critical: 'bg-red-500',
+} as const
 
-export const PM_INTERVALS = [
-  { label: 'Daily', days: 1 },
-  { label: 'Weekly', days: 7 },
-  { label: 'Bi-weekly', days: 14 },
-  { label: 'Monthly', days: 30 },
-  { label: 'Quarterly', days: 90 },
-  { label: 'Semi-annual', days: 180 },
-  { label: 'Annual', days: 365 },
-] as const
+export const STATUS_COLORS = {
+  running: 'bg-emerald-500',
+  maintenance_due: 'bg-amber-500',
+  breakdown: 'bg-red-500',
+} as const
+
+export const WO_STATUS_COLORS = {
+  open: 'bg-slate-500',
+  assigned: 'bg-blue-500',
+  in_progress: 'bg-amber-500',
+  completed: 'bg-emerald-500',
+} as const
