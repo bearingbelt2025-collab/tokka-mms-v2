@@ -17,7 +17,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 
@@ -156,11 +156,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar */}
         <header className="md:hidden flex items-center gap-3 px-4 h-14 border-b border-border bg-card shrink-0">
-          <SheetTrigger asChild onClick={() => setMobileOpen(true)}>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <Menu className="h-4 w-4" />
-            </Button>
-          </SheetTrigger>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setMobileOpen(true)}>
+            <Menu className="h-4 w-4" />
+          </Button>
           <h1 className="font-mono-display font-bold text-sm flex-1">{pageTitle}</h1>
           <div className="flex items-center gap-2">
             <Zap className="h-4 w-4 text-primary" />
